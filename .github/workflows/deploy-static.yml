@@ -1,0 +1,138 @@
+name: Deploy static site
+
+# Reusable workflow: builds a static site on Linux and copies it to the VPS
+# with rsync. A demo repo calls it with a few lines (static/caller.yml).
+#
+# What the calling repo needs (static/README.md has the full checklist):
+# - a GitHub environment (default "production") with
+#   vars SSH_HOST, SSH_PORT, SSH_USER and secrets SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS
+# - on the server, that key may only run rrsync inside /srv/static/<name>,
+#   so "/" on our side is that folder and this workflow never needs the name.
+on:
+  workflow_call:
+    inputs:
+      site-url:
+        description: Public URL of the site, e.g. https://cafe.ali-moradi-develop.com
+        type: string
+        required: true
+      output-dir:
+        description: Folder the build writes, e.g. out, dist or apps/docs/out
+        type: string
+        required: true
+      build-command:
+        description: Command that builds the site
+        type: string
+        default: pnpm build
+      smoke-paths:
+        description: Paths that must answer 200 after the deploy (separated by spaces)
+        type: string
+        default: /
+      environment:
+        description: GitHub environment that holds the SSH settings
+        type: string
+        default: production
+      node-version-file:
+        description: File with the Node version
+        type: string
+        default: .nvmrc
+    secrets:
+      # Normally not passed by the caller: a job that runs in an environment
+      # reads that environment's secrets by itself.
+      SSH_PRIVATE_KEY:
+        required: false
+      SSH_KNOWN_HOSTS:
+        required: false
+
+permissions:
+  contents: read # checkout only
+
+jobs:
+  build:
+    name: Build
+    # No secrets in this job: install scripts and the build never see the key.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Inputs reach the shell only through env, never as ${{ }} inside run.
+      - name: Build
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "$BUILD_COMMAND"
+      # One archive keeps every file name exactly ("!", "$") and uploads
+      # faster than hundreds of small files.
+      - name: Pack
+        env:
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+        run: |
+          test -f "$OUTPUT_DIR/index.html" || { echo "::error::$OUTPUT_DIR/index.html not found"; exit 1; }
+          tar -czf static-site.tgz -C "$OUTPUT_DIR" .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: static-site
+          path: static-site.tgz
+          retention-days: 7
+
+  deploy:
+    name: Copy to the server
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Never cancel a running deploy; queue the next one.
+    concurrency:
+      group: deploy-${{ github.repository }}
+      cancel-in-progress: false
+    # The environment decides which branches may deploy and holds the key.
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.site-url }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: static-site
+      - run: mkdir site && tar -xzf static-site.tgz -C site
+      - name: SSH key and known host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ] || [ -z "$SSH_KNOWN_HOSTS" ]; then
+            echo "::error::SSH_PRIVATE_KEY or SSH_KNOWN_HOSTS is missing in the environment"
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      # -c: compare by checksum (unchanged files keep their ETag)
+      # --delete-delay / --delay-updates: swap all files in at the end
+      - name: rsync
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT }}
+          SSH_USER: ${{ vars.SSH_USER }}
+        run: >-
+          rsync -rlc --delete-delay --delay-updates --chmod=D755,F644 --stats
+          -e "ssh -i $HOME/.ssh/deploy_key -p $SSH_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          site/ "$SSH_USER@$SSH_HOST:/"
+      - name: Smoke test
+        env:
+          SITE_URL: ${{ inputs.site-url }}
+          SMOKE_PATHS: ${{ inputs.smoke-paths }}
+        run: |
+          set -f # no glob expansion in the path list
+          for path in $SMOKE_PATHS; do
+            curl --fail --silent --show-error --output /dev/null \
+              --retry 3 --retry-delay 5 --retry-all-errors "${SITE_URL%/}$path"
+            echo "ok $path"
+          done
+      - if: always()
+        run: rm -f ~/.ssh/deploy_key

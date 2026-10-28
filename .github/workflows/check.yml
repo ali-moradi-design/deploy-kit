@@ -1,0 +1,28 @@
+name: Check
+
+# Lints the workflows in this repo. Every demo runs them, so a broken file
+# here would break every deploy.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # checkout only
+
+jobs:
+  check:
+    name: Workflows are valid
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Go and pipx are preinstalled on the runner; versions pinned here.
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - run: pipx run zizmor==1.31.1 --pedantic --offline .github/workflows

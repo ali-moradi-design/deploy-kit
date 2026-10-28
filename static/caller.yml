@@ -1,0 +1,22 @@
+# Copy to .github/workflows/deploy.yml in a static demo repo and fill the
+# three "with" values. Replace <sha> with the full commit SHA of deploy-kit
+# that you want (Dependabot keeps it current).
+name: Deploy
+
+on:
+  push:
+    branches: [main] # main is protected: a merge means CI was green
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ali-moradi-design/deploy-kit/.github/workflows/deploy-static.yml@<sha> # v1
+    with:
+      site-url: https://<name>.ali-moradi-develop.com
+      output-dir: out
+      smoke-paths: / /404.html
+      # build-command: pnpm build   (default)
+      # environment: production     (default)

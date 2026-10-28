@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Actions are pinned to SHAs; Dependabot keeps the SHAs (and version
+  # comments) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
