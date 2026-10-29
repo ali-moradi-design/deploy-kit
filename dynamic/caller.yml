@@ -1,0 +1,49 @@
+# Example .github/workflows/docker.yml for a dynamic demo: the repo builds its
+# own images (every app builds differently), then deploy-kit deploys them.
+# Replace <name>, <sha> (full deploy-kit commit SHA) and the build steps.
+name: Docker
+
+on:
+  # Build only after CI passed on main (works also when main is not protected).
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  images:
+    name: Build and push images
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - id: sha
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          persist-credentials: false
+      # ... log in to ghcr.io, build and push
+      #     ghcr.io/ali-moradi-design/<name>-web:<sha> (and -api:<sha>) ...
+
+  deploy:
+    needs: images
+    uses: ali-moradi-design/deploy-kit/.github/workflows/deploy-app.yml@<sha> # v1
+    with:
+      image-tag: ${{ needs.images.outputs.sha }}
+      site-url: https://<name>.ali-moradi-develop.com
+      smoke-paths: / /api/health

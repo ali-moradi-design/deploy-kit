@@ -7,7 +7,8 @@ passwords stay in each repo's GitHub environment and in `.env` on the server.
 | Kind | Workflow | Templates and checklist |
 | --- | --- | --- |
 | Static site (files served by Nginx) | `.github/workflows/deploy-static.yml` | `static/` |
-| Dynamic app (Docker + own database) | coming next | `dynamic/` |
+| Dynamic app (Docker + own database) | `.github/workflows/deploy-app.yml` | `dynamic/` |
+| Server scripts (installed once) | | `server/` |
 
 ## Using a workflow
 
@@ -29,5 +30,6 @@ jobs:
 ## Server layout (same for every site)
 
 - Static: `/srv/static/<name>`, key forced to `rrsync` for that folder.
-- Dynamic: `/srv/apps/<name>/compose.yaml` + `.env`, port only on `127.0.0.1`.
+- Dynamic: `/srv/apps/<name>/compose.yaml` + `.env`, port only on `127.0.0.1`; key forced to
+  `deploy-app <name>`, which only accepts a commit SHA and rolls back by itself when the new containers are unhealthy.
 - Nginx on the host: `/etc/nginx/sites-available/<name>` symlinked into `sites-enabled`, one certbot certificate per site.

@@ -1,0 +1,31 @@
+#!/bin/sh
+# Removes old app images: keeps only the tags named in /srv/apps/*/.env and
+# /srv/apps/*/.env.previous (current + previous image of every app).
+# DRY_RUN=1 only prints what it would remove.
+# Install: sudo install -m 755 cleanup-images /usr/local/bin/cleanup-images
+# Cron of deploy: 0 4 * * * /usr/local/bin/cleanup-images 2>&1 | logger -t cleanup-images
+set -eu
+APPS_DIR=${APPS_DIR:-/srv/apps}
+REGISTRY=ghcr.io/ali-moradi-design/
+
+# only the IMAGE_TAG lines, and only full commit SHAs (40 hex characters)
+keep=$(cat "$APPS_DIR"/*/.env "$APPS_DIR"/*/.env.previous 2>/dev/null \
+  | sed -n 's/^IMAGE_TAG=\([0-9a-f]\{40\}\)$/\1/p' | sort -u)
+if [ -z "$keep" ]; then
+  echo "no IMAGE_TAG found, nothing removed"
+  exit 1
+fi
+
+docker image ls --format '{{.Repository}} {{.Tag}}' | while read -r repo tag; do
+  case "$repo" in "$REGISTRY"*) ;; *) continue ;; esac
+  [ "$tag" = "<none>" ] && continue
+  printf '%s\n' "$keep" | grep -qx "$tag" && continue
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "would remove $repo:$tag"
+  else
+    echo "removing $repo:$tag"
+    docker image rm "$repo:$tag" >/dev/null || echo "  could not remove $repo:$tag (in use?)"
+  fi
+done
+
+[ "${DRY_RUN:-0}" = 1 ] || docker image prune -f >/dev/null

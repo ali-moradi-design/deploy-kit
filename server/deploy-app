@@ -1,0 +1,61 @@
+#!/bin/sh
+# Forced command for one app's deploy key. In /home/deploy/.ssh/authorized_keys:
+#   command="/usr/local/bin/deploy-app leather-shop",restrict ssh-ed25519 AAAA... github-actions-leather-shop
+# The key can then do exactly one thing: run this app with another image tag.
+# The client sends only the tag (a 40-character commit SHA) as its "command":
+#   ssh deploy@server <sha>
+# Optional second argument: seconds to wait for healthy containers (default 180).
+#
+# Install: sudo install -m 755 deploy-app /usr/local/bin/deploy-app
+set -eu
+
+app=${1:-}
+wait_timeout=${2:-180}
+case "$app" in
+  "" | *[!a-z0-9-]*) echo "deploy-app: bad app name '$app'" >&2; exit 2 ;;
+esac
+case "$wait_timeout" in
+  "" | *[!0-9]*) echo "deploy-app: bad timeout '$wait_timeout'" >&2; exit 2 ;;
+esac
+
+tag=${SSH_ORIGINAL_COMMAND:-}
+case "$tag" in
+  *[!0-9a-f]*) tag= ;; # anything but lowercase hex (also a newline or ";")
+esac
+if [ "${#tag}" -ne 40 ]; then
+  echo "deploy-app: expected a 40-character commit SHA" >&2
+  exit 2
+fi
+
+cd "${APPS_DIR:-/srv/apps}/$app"
+grep -q '^IMAGE_TAG=' .env || { echo "deploy-app: no IMAGE_TAG line in .env" >&2; exit 2; }
+
+# One deploy per app at a time; a second one waits here.
+exec 9>.deploy.lock
+flock 9
+
+current=$(sed -n 's/^IMAGE_TAG=//p' .env)
+if [ "$current" != "$tag" ]; then
+  # .env also holds the secrets: keep a copy and change only the tag line.
+  cp -p .env .env.previous
+  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$tag/" .env
+fi
+echo "deploy-app: $app $current -> $tag"
+
+if ! docker compose pull --quiet; then
+  echo "deploy-app: pull failed, .env restored, nothing changed" >&2
+  [ "$current" = "$tag" ] || cp -p .env.previous .env
+  exit 1
+fi
+
+if ! docker compose up -d --wait --wait-timeout "$wait_timeout"; then
+  echo "deploy-app: new version not healthy, rolling back to $current" >&2
+  docker compose ps -a >&2 || true
+  if [ "$current" != "$tag" ]; then
+    cp -p .env.previous .env
+    docker compose up -d --wait --wait-timeout "$wait_timeout" || true
+  fi
+  exit 1
+fi
+
+docker compose ps

@@ -1,0 +1,82 @@
+# /srv/apps/__NAME__/compose.yaml: one app = web (+ api) + its own database.
+# Images are built in CI and only pulled here (never build on the server).
+# .env next to this file holds IMAGE_TAG (the commit SHA to run) and the secrets.
+# Fill __NAME__, __DOMAIN__ and __PORT__ (next free port in the port table).
+# No separate API? Delete the api service and point web at the database.
+# Database is Postgres here; MySQL and MongoDB blocks are in databases.md.
+name: __NAME__
+
+services:
+  db:
+    image: postgres:17.6-alpine # pin the exact version
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set}
+      POSTGRES_DB: app
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks: [backend]
+    # no published ports: only the api reaches the database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/ali-moradi-design/__NAME__-api:${IMAGE_TAG:?IMAGE_TAG is not set}
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://app:${DB_PASSWORD}@db:5432/app
+      CORS_ORIGIN: https://__DOMAIN__
+      # app secrets: name each one, never env_file the whole .env into every service
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is not set}
+    networks: [backend, frontend]
+    depends_on:
+      db:
+        condition: service_healthy
+    # node:slim has no curl; Node's fetch works everywhere
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/ali-moradi-design/__NAME__-web:${IMAGE_TAG:?IMAGE_TAG is not set}
+    environment:
+      API_URL: http://api:4000
+      NEXT_PUBLIC_SITE_URL: https://__DOMAIN__
+    # Nginx on the host proxies to this; Docker bypasses ufw, so loopback only
+    ports:
+      - "127.0.0.1:__PORT__:3000"
+    networks: [frontend]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/robots.txt').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    restart: unless-stopped
+
+networks:
+  backend:
+    internal: true # the database has no internet and nothing outside reaches it
+  frontend: {}
+
+volumes:
+  db-data:

@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   check:
-    name: Workflows are valid
+    name: Workflows and scripts are valid
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,3 +26,5 @@ jobs:
       # Go and pipx are preinstalled on the runner; versions pinned here.
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: pipx run zizmor==1.31.1 --pedantic --offline .github/workflows
+      # shellcheck is preinstalled on the runner
+      - run: shellcheck server/deploy-app server/cleanup-images
