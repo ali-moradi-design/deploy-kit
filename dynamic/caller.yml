@@ -43,6 +43,9 @@ jobs:
   deploy:
     needs: images
     uses: ali-moradi-design/deploy-kit/.github/workflows/deploy-app.yml@<sha> # v1
+    # the deploy job needs the environment's SSH secrets; deploy-kit is ours
+    # and pinned to a SHA, so passing them on is safe
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       image-tag: ${{ needs.images.outputs.sha }}
       site-url: https://<name>.ali-moradi-develop.com

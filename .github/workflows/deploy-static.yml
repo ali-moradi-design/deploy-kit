@@ -6,6 +6,8 @@ name: Deploy static site
 # What the calling repo needs (static/README.md has the full checklist):
 # - a GitHub environment (default "production") with
 #   vars SSH_HOST, SSH_PORT, SSH_USER and secrets SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS
+# - `secrets: inherit` on the calling job: without it the deploy job does not
+#   get the environment's secrets, although it runs in that environment
 # - on the server, that key may only run rrsync inside /srv/static/<name>,
 #   so "/" on our side is that folder and this workflow never needs the name.
 on:
@@ -35,13 +37,6 @@ on:
         description: File with the Node version
         type: string
         default: .nvmrc
-    secrets:
-      # Normally not passed by the caller: a job that runs in an environment
-      # reads that environment's secrets by itself.
-      SSH_PRIVATE_KEY:
-        required: false
-      SSH_KNOWN_HOSTS:
-        required: false
 
 permissions:
   contents: read # checkout only
@@ -105,7 +100,7 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           if [ -z "$SSH_PRIVATE_KEY" ] || [ -z "$SSH_KNOWN_HOSTS" ]; then
-            echo "::error::SSH_PRIVATE_KEY or SSH_KNOWN_HOSTS is missing in the environment"
+            echo "::error::SSH_PRIVATE_KEY or SSH_KNOWN_HOSTS is empty: is the environment right, and does the caller use secrets: inherit?"
             exit 1
           fi
           install -d -m 700 ~/.ssh

@@ -19,12 +19,13 @@ jobs:
     with:
       site-url: https://cafe.ali-moradi-develop.com
       output-dir: out
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 ```
 
 - Pin the full commit SHA, not `main`: a change here then reaches a demo only when that demo updates the SHA
   (Dependabot does it with a PR, so the demo's CI checks the new version first).
-- The deploy job runs in the caller's environment (default `production`) and reads `SSH_*` from there;
-  the caller passes no secrets.
+- The deploy job runs in the caller's environment (default `production`) and reads `SSH_*` from there.
+  The caller must use `secrets: inherit`: a called workflow gets no environment secrets without it.
 - The caller's `permissions` must allow at least `contents: read`.
 
 ## Server layout (same for every site)

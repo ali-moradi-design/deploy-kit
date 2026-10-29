@@ -14,6 +14,9 @@ permissions:
 jobs:
   deploy:
     uses: ali-moradi-design/deploy-kit/.github/workflows/deploy-static.yml@<sha> # v1
+    # the deploy job needs the environment's SSH secrets; deploy-kit is ours
+    # and pinned to a SHA, so passing them on is safe
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       site-url: https://<name>.ali-moradi-develop.com
       output-dir: out
